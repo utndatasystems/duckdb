@@ -599,6 +599,9 @@ void RowGroup::TemplatedScan(TransactionData transaction, CollectionScanState &s
 			if (has_filters) {
 				D_ASSERT(ALLOW_UPDATES);
 				auto &filter_list = filter_info.GetFilterList();
+
+				std::cerr << "filter_list.size=" << filter_list.size() << std::endl;
+
 				for (idx_t i = 0; i < filter_list.size(); i++) {
 					auto filter_idx = adaptive_filter->permutation[i];
 					auto &filter = filter_list[filter_idx];
