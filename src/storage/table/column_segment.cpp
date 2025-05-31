@@ -8,6 +8,7 @@
 #include "duckdb/planner/filter/conjunction_filter.hpp"
 #include "duckdb/planner/filter/constant_filter.hpp"
 #include "duckdb/planner/filter/struct_filter.hpp"
+#include "duckdb/planner/filter/bitmask_filter.hpp"
 #include "duckdb/storage/data_pointer.hpp"
 #include "duckdb/storage/storage_manager.hpp"
 #include "duckdb/storage/table/append_state.hpp"
@@ -612,6 +613,21 @@ idx_t ColumnSegment::FilterSelection(SelectionVector &sel, Vector &vector, Unifi
 		}
 		sel.Initialize(result_sel);
 		return approved_tuple_count;
+	}
+	case TableFilterType::BITMASK_EQUALS: {
+		auto &filt = filter.Cast<BitmaskEqualsFilter>();
+		auto mask_val = filt.mask.GetValue<uint64_t>();
+		auto expected_val = filt.expected.GetValue<uint64_t>();
+
+		idx_t result_count = 0;
+		for (idx_t i = 0; i < approved_tuple_count; i++) {
+			auto idx = sel.get_index(i);
+			auto val = vector.GetValue(idx);
+			if (!val.IsNull() && ((val.GetValue<uint64_t>() & mask_val) == expected_val)) {
+				sel.set_index(result_count++, idx);
+			}
+		}
+		return result_count;
 	}
 	default:
 		throw InternalException("FIXME: unsupported type for filter selection");

@@ -160,5 +160,16 @@
       }
     ],
     "constructor": ["expr"]
+  },
+  {
+    "class": "BitmaskEqualsFilter",
+    "base": "TableFilter",
+    "includes": ["duckdb/planner/filter/bitmask_filter.hpp"],
+    "enum": "BITMASK_EQUALS",
+    "members": [
+      { "id": 200, "name": "mask", "type": "Value" },
+      { "id": 201, "name": "expected", "type": "Value" }
+    ],
+    "constructor": ["mask", "expected"]
   }
 ]

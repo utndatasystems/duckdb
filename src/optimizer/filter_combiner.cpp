@@ -18,6 +18,7 @@
 #include "duckdb/planner/filter/null_filter.hpp"
 #include "duckdb/planner/filter/optional_filter.hpp"
 #include "duckdb/planner/filter/struct_filter.hpp"
+#include "duckdb/planner/filter/bitmask_filter.hpp"
 #include "duckdb/planner/table_filter.hpp"
 #include "duckdb/common/operator/subtract.hpp"
 #include "duckdb/optimizer/column_lifetime_analyzer.hpp"
@@ -603,6 +604,49 @@ FilterPushdownResult FilterCombiner::TryPushdownOrClause(TableFilterSet &table_f
 	return FilterPushdownResult::PUSHED_DOWN_PARTIALLY;
 }
 
+FilterPushdownResult FilterCombiner::TryPushdownBitmaskFilter(TableFilterSet &table_filters,
+                                                               const vector<ColumnIndex> &column_ids,
+                                                               Expression &expr) {
+	if (expr.GetExpressionClass() != ExpressionClass::BOUND_COMPARISON) {
+		return FilterPushdownResult::NO_PUSHDOWN;
+	}
+	auto &comparison = expr.Cast<BoundComparisonExpression>();
+
+	// Only push down x & MASK = VAL style
+	if (comparison.GetExpressionType() != ExpressionType::COMPARE_EQUAL) {
+		return FilterPushdownResult::NO_PUSHDOWN;
+	}
+
+	if (comparison.left->GetExpressionClass() != ExpressionClass::BOUND_FUNCTION ||
+	    comparison.right->GetExpressionType() != ExpressionType::VALUE_CONSTANT) {
+		return FilterPushdownResult::NO_PUSHDOWN;
+	}
+
+	auto &func_expr = comparison.left->Cast<BoundFunctionExpression>();
+	if (func_expr.function.name != "&" || func_expr.children.size() != 2) {
+		return FilterPushdownResult::NO_PUSHDOWN;
+	}
+
+	if (func_expr.children[0]->GetExpressionClass() != ExpressionClass::BOUND_COLUMN_REF ||
+	    func_expr.children[1]->GetExpressionType() != ExpressionType::VALUE_CONSTANT) {
+		return FilterPushdownResult::NO_PUSHDOWN;
+	}
+
+	// Parse components
+	auto &column_expr = func_expr.children[0]->Cast<BoundColumnRefExpression>();
+	auto &mask_expr = func_expr.children[1]->Cast<BoundConstantExpression>();
+	auto &expected_expr = comparison.right->Cast<BoundConstantExpression>();
+
+	// Map column binding to ColumnIndex
+	ColumnIndex column_index(column_ids[column_expr.binding.column_index]);
+
+	// Build and push the BitmaskEqualsFilter
+	auto filter = make_uniq<BitmaskEqualsFilter>(mask_expr.value, expected_expr.value);
+	table_filters.PushFilter(column_index, std::move(filter));
+
+	return FilterPushdownResult::PUSHED_DOWN_FULLY;
+}
+
 FilterPushdownResult FilterCombiner::TryPushdownExpression(TableFilterSet &table_filters,
                                                            const vector<ColumnIndex> &column_ids, Expression &expr) {
 	auto pushdown_result = TryPushdownPrefixFilter(table_filters, column_ids, expr);
@@ -621,6 +665,11 @@ FilterPushdownResult FilterCombiner::TryPushdownExpression(TableFilterSet &table
 	if (pushdown_result != FilterPushdownResult::NO_PUSHDOWN) {
 		return pushdown_result;
 	}
+	pushdown_result = TryPushdownBitmaskFilter(table_filters, column_ids, expr);
+	if (pushdown_result != FilterPushdownResult::NO_PUSHDOWN) {
+		return pushdown_result;
+	}
+
 	return FilterPushdownResult::NO_PUSHDOWN;
 }
 

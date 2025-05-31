@@ -14,6 +14,7 @@
 #include "duckdb/planner/filter/in_filter.hpp"
 #include "duckdb/planner/filter/dynamic_filter.hpp"
 #include "duckdb/planner/filter/expression_filter.hpp"
+#include "duckdb/planner/filter/bitmask_filter.hpp"
 
 namespace duckdb {
 
@@ -54,6 +55,9 @@ unique_ptr<TableFilter> TableFilter::Deserialize(Deserializer &deserializer) {
 		break;
 	case TableFilterType::STRUCT_EXTRACT:
 		result = StructFilter::Deserialize(deserializer);
+		break;
+	case TableFilterType::BITMASK_EQUALS:
+		result = BitmaskEqualsFilter::Deserialize(deserializer);
 		break;
 	default:
 		throw SerializationException("Unsupported type for deserialization of TableFilter!");
@@ -169,6 +173,18 @@ unique_ptr<TableFilter> StructFilter::Deserialize(Deserializer &deserializer) {
 	auto child_filter = deserializer.ReadPropertyWithDefault<unique_ptr<TableFilter>>(202, "child_filter");
 	auto result = duckdb::unique_ptr<StructFilter>(new StructFilter(child_idx, std::move(child_name), std::move(child_filter)));
 	return std::move(result);
+}
+
+void BitmaskEqualsFilter::Serialize(Serializer &serializer) const {
+	TableFilter::Serialize(serializer);
+	serializer.WriteProperty<Value>(200, "mask", mask);
+	serializer.WriteProperty<Value>(201, "expected", expected);
+}
+
+unique_ptr<TableFilter> BitmaskEqualsFilter::Deserialize(Deserializer &deserializer) {
+	auto mask = deserializer.ReadProperty<Value>(200, "mask");
+	auto expected = deserializer.ReadProperty<Value>(201, "expected");
+	return make_uniq<BitmaskEqualsFilter>(mask, expected);
 }
 
 } // namespace duckdb

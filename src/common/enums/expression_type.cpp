@@ -89,6 +89,12 @@ string ExpressionTypeToString(ExpressionType type) {
 		return "COALESCE";
 	case ExpressionType::OPERATOR_TRY:
 		return "TRY";
+	case ExpressionType::OPERATOR_BITWISE_AND:
+		return "BITWISE_AND";
+	case ExpressionType::OPERATOR_BITWISE_OR:
+		return "BITWISE_OR";
+	case ExpressionType::OPERATOR_BITWISE_XOR:
+		return "BITWISE_XOR";
 	case ExpressionType::ARRAY_EXTRACT:
 		return "ARRAY_EXTRACT";
 	case ExpressionType::ARRAY_SLICE:
@@ -259,6 +265,12 @@ string ExpressionTypeToOperator(ExpressionType type) {
 		return "AND";
 	case ExpressionType::CONJUNCTION_OR:
 		return "OR";
+	case ExpressionType::OPERATOR_BITWISE_AND:
+		return "&";
+	case ExpressionType::OPERATOR_BITWISE_OR:
+		return "|";
+	case ExpressionType::OPERATOR_BITWISE_XOR:
+		return "^";
 	default:
 		return "";
 	}
@@ -331,7 +343,10 @@ ExpressionType OperatorToExpressionType(const string &op) {
 		return ExpressionType::COMPARE_LESSTHANOREQUALTO;
 	} else if (op == ">=") {
 		return ExpressionType::COMPARE_GREATERTHANOREQUALTO;
-	}
+	} else if (op == "&") return ExpressionType::OPERATOR_BITWISE_AND;
+	else if (op == "|") return ExpressionType::OPERATOR_BITWISE_OR;
+	else if (op == "^") return ExpressionType::OPERATOR_BITWISE_XOR;
+
 	return ExpressionType::INVALID;
 }
 

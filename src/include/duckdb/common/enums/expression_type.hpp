@@ -123,6 +123,13 @@ enum class ExpressionType : uint8_t {
 	OPERATOR_TRY = 158,
 
 	// -----------------------------
+	// Bitwise Operators (custom)
+	// -----------------------------
+	OPERATOR_BITWISE_AND = 159,
+	OPERATOR_BITWISE_OR = 160,
+	OPERATOR_BITWISE_XOR = 161,
+
+	// -----------------------------
 	// Subquery IN/EXISTS
 	// -----------------------------
 	SUBQUERY = 175,
