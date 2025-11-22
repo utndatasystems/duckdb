@@ -7,6 +7,8 @@
 
 #include <cmath>
 
+#include <iostream>
+
 namespace duckdb {
 
 static vector<unordered_set<idx_t>> AddSuperSets(const vector<unordered_set<idx_t>> &current,
@@ -135,7 +137,7 @@ unique_ptr<DPJoinNode> PlanEnumerator::CreateJoinTree(JoinRelationSet &set,
 	// need the filter info from the Neighborhood info.
 	auto cost = cost_model.ComputeCost(left, right);
 	auto result = make_uniq<DPJoinNode>(set, best_connection, left.set, right.set, cost);
-	result->cardinality = cost_model.cardinality_estimator.EstimateCardinalityWithSet<idx_t>(set);
+	result->cardinality = cost_model.cardinality_estimator.EstimateCardinalityWithSet<idx_t>(set, query_graph_manager.relation_manager.GetRelationStats());
 	return result;
 }
 
@@ -472,6 +474,12 @@ void PlanEnumerator::InitLeafPlans() {
 // https://db.in.tum.de/teaching/ws1415/queryopt/chapter3.pdf?lang=de
 void PlanEnumerator::SolveJoinOrder() {
 	bool force_no_cross_product = DBConfig::GetSetting<DebugForceNoCrossProductSetting>(query_graph_manager.context);
+
+	auto tmp = query_graph_manager.relation_manager.GetRelationStats();
+	for (auto &elem : tmp) {
+		std::cerr << "key=" << elem.table_name << std::endl;
+	}
+
 	// first try to solve the join order exactly
 	if (query_graph_manager.relation_manager.NumRelations() >= THRESHOLD_TO_SWAP_TO_APPROXIMATE) {
 		SolveJoinOrderApproximately();

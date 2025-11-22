@@ -96,6 +96,10 @@ private:
 	JoinRelationSetManager set_manager;
 	vector<RelationStats> relation_stats;
 
+
+	unordered_map<string, double> injected_cards;
+	void LoadInjectedCardinalities();
+
 public:
 	void RemoveEmptyTotalDomains();
 	void UpdateTotalDomains(optional_ptr<JoinRelationSet> set, RelationStats &stats);
@@ -106,7 +110,7 @@ public:
 	//! cost model needs estimated cardinalities to the fraction since the formula captures
 	//! distinct count selectivities and multiplicities. Hence the template
 	template <class T>
-	T EstimateCardinalityWithSet(JoinRelationSet &new_set);
+	T EstimateCardinalityWithSet(JoinRelationSet &new_set, vector<RelationStats> relation_stats = {});
 
 	//! used for debugging.
 	void AddRelationNamesToTdoms(vector<RelationStats> &stats);

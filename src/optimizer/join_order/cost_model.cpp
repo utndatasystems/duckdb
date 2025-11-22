@@ -10,7 +10,7 @@ CostModel::CostModel(QueryGraphManager &query_graph_manager)
 
 double CostModel::ComputeCost(DPJoinNode &left, DPJoinNode &right) {
 	auto &combination = query_graph_manager.set_manager.Union(left.set, right.set);
-	auto join_card = cardinality_estimator.EstimateCardinalityWithSet<double>(combination);
+	auto join_card = cardinality_estimator.EstimateCardinalityWithSet<double>(combination, query_graph_manager.relation_manager.GetRelationStats());
 	auto join_cost = join_card;
 	return join_cost + left.cost + right.cost;
 }

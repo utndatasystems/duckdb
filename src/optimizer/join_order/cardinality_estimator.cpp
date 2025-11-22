@@ -11,6 +11,9 @@
 
 #include <math.h>
 
+#include <fstream>
+#include <iostream>
+
 namespace duckdb {
 
 // The filter was made on top of a logical sample or other projection,
@@ -392,9 +395,70 @@ DenomInfo CardinalityEstimator::GetDenominator(JoinRelationSet &set) {
 	return DenomInfo(*subgraphs.at(0).numerator_relations, 1, subgraphs.at(0).denom * denom_multiplier);
 }
 
+void CardinalityEstimator::LoadInjectedCardinalities() {
+    if (!injected_cards.empty()) return; // Load once
+
+    std::ifstream in("/home/stoian/gsl/robust_memory_estimation/src/xbound/duckdb-new-cards.csv");
+    if (!in.is_open()) {
+        std::cerr << "[WARNING] Could not open injected-cardinality CSV\n";
+        return;
+    }
+
+    std::string line;
+    while (std::getline(in, line)) {
+        // expected:  [a, b, c] # 1234.0
+        auto hash_pos = line.find('#');
+        if (hash_pos == std::string::npos) continue;
+
+        string left = line.substr(0, hash_pos);
+        string right = line.substr(hash_pos + 1);
+
+        // trim whitespace
+        auto trim = [](string &s) {
+            while (!s.empty() && isspace(s.back())) s.pop_back();
+            while (!s.empty() && isspace(s.front())) s.erase(s.begin());
+        };
+        trim(left);
+        trim(right);
+
+			
+        double value = atof(right.c_str());
+				std::cerr << ".." << left << ".. => " << value << std::endl; 
+        injected_cards[left] = value;
+    }
+
+    std::cerr << "[LoadInjectedCardinalities] Loaded "
+              << injected_cards.size() << " entries\n";
+}
+
 template <>
-double CardinalityEstimator::EstimateCardinalityWithSet(JoinRelationSet &new_set) {
+double CardinalityEstimator::EstimateCardinalityWithSet(JoinRelationSet &new_set, vector<RelationStats> injected_relation_stats) {
+	auto getTableNames = [&injected_relation_stats]() {
+		std::vector<std::string> table_names;
+		for (auto& elem : injected_relation_stats) {
+			table_names.push_back(elem.table_name);
+		}
+		std::sort(table_names.begin(), table_names.end());
+		return table_names;
+	};
+
+	LoadInjectedCardinalities();
+
+	auto table_names = getTableNames();
+	auto new_set_str = new_set.ToStringWithTableNames(table_names);
+	std::cerr << "[EstimateCardinalityWithSet] new_set=" << new_set_str << std::endl;
+
+	// First check CSV injection
+	auto it = injected_cards.find(new_set_str);
+	if (it != injected_cards.end()) {
+		double injected_value = it->second;
+		std::cerr << "-> injected CSV value = " << injected_value << std::endl;
+		return injected_value;
+	}
+
 	if (relation_set_2_cardinality.find(new_set.ToString()) != relation_set_2_cardinality.end()) {
+		auto ret = relation_set_2_cardinality[new_set.ToString()].cardinality_before_filters;
+		std::cerr << "-> " << ret << std::endl; 
 		return relation_set_2_cardinality[new_set.ToString()].cardinality_before_filters;
 	}
 
@@ -405,12 +469,13 @@ double CardinalityEstimator::EstimateCardinalityWithSet(JoinRelationSet &new_set
 	double result = numerator / denom.denominator;
 	auto new_entry = CardinalityHelper(result);
 	relation_set_2_cardinality[new_set.ToString()] = new_entry;
+	std::cerr << "-> " << result << std::endl; 
 	return result;
 }
 
 template <>
-idx_t CardinalityEstimator::EstimateCardinalityWithSet(JoinRelationSet &new_set) {
-	auto cardinality_as_double = EstimateCardinalityWithSet<double>(new_set);
+idx_t CardinalityEstimator::EstimateCardinalityWithSet(JoinRelationSet &new_set, vector<RelationStats> injected_relation_stats) {
+	auto cardinality_as_double = EstimateCardinalityWithSet<double>(new_set, injected_relation_stats);
 	auto max = NumericLimits<idx_t>::Maximum();
 	if (cardinality_as_double >= (double)max) {
 		return max;

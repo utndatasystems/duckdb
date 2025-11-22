@@ -5,6 +5,8 @@
 
 #include <algorithm>
 
+#include <iostream>
+
 namespace duckdb {
 
 using JoinRelationTreeNode = JoinRelationSetManager::JoinRelationTreeNode;
@@ -17,6 +19,18 @@ string JoinRelationSet::ToString() const {
 	return result;
 }
 // LCOV_EXCL_STOP
+
+string JoinRelationSet::ToStringWithTableNames(std::vector<std::string>& table_names) {
+	string result = "[";
+	for (unsigned index = 0; index != count; ++index) {
+		if (index) {
+			result += ", ";
+		}
+		result += table_names[relations[index]];
+	}
+	result += "]";
+	return result;
+}
 
 //! Returns true if sub is a subset of super
 bool JoinRelationSet::IsSubset(JoinRelationSet &super, JoinRelationSet &sub) {
