@@ -9,12 +9,13 @@
 
 #include "duckdb/planner/column_binding_map.hpp"
 #include "duckdb/optimizer/join_order/query_graph.hpp"
-
 #include "duckdb/optimizer/join_order/relation_statistics_helper.hpp"
 
 namespace duckdb {
 
+class QueryGraphManager;
 class FilterInfo;
+class InjectedCardinalities;
 
 struct DenomInfo {
 	DenomInfo(JoinRelationSet &numerator_relations, double filter_strength, double denominator)
@@ -96,10 +97,6 @@ private:
 	JoinRelationSetManager set_manager;
 	vector<RelationStats> relation_stats;
 
-
-	unordered_map<string, double> injected_cards;
-	void LoadInjectedCardinalities();
-
 public:
 	void RemoveEmptyTotalDomains();
 	void UpdateTotalDomains(optional_ptr<JoinRelationSet> set, RelationStats &stats);
@@ -110,7 +107,7 @@ public:
 	//! cost model needs estimated cardinalities to the fraction since the formula captures
 	//! distinct count selectivities and multiplicities. Hence the template
 	template <class T>
-	T EstimateCardinalityWithSet(JoinRelationSet &new_set, vector<RelationStats> relation_stats = {});
+	T EstimateCardinalityWithSet(JoinRelationSet &new_set, QueryGraphManager& query_graph_manager);
 
 	//! used for debugging.
 	void AddRelationNamesToTdoms(vector<RelationStats> &stats);

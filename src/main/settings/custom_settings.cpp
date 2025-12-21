@@ -32,6 +32,9 @@
 #include "duckdb/logging/logger.hpp"
 #include "duckdb/logging/log_manager.hpp"
 
+// Needed for injected cardinalities.
+#include <fstream>
+
 namespace duckdb {
 
 const string GetDefaultUserAgent() {
@@ -1056,6 +1059,73 @@ void IndexScanPercentageSetting::OnSet(SettingCallbackInfo &, Value &input) {
 	if (index_scan_percentage < 0 || index_scan_percentage > 1.0) {
 		throw InvalidInputException("the index scan percentage must be within [0, 1]");
 	}
+}
+
+//===----------------------------------------------------------------------===//
+// Injected Cardinality Estimates Input File
+//===----------------------------------------------------------------------===//
+InjectedCardinalities::InjectedCardinalities(std::string input_file) {
+	// No input file? Then clear.
+	if (input_file.empty()) {
+		data.clear();
+		return;
+	}
+
+	// Open the file.
+	std::ifstream in(input_file);
+	assert(in.is_open());
+
+	// And read.
+	std::string line;
+	while (std::getline(in, line)) {
+		// Expected:  [a, b, c] # 1234.0.
+		auto hash_pos = line.find('#');
+		if (hash_pos == std::string::npos) continue;
+
+		string left = line.substr(0, hash_pos);
+		string right = line.substr(hash_pos + 1);
+
+		// Trim whitespace.
+		auto trim = [](string &s) {
+			while (!s.empty() && isspace(s.back())) s.pop_back();
+			while (!s.empty() && isspace(s.front())) s.erase(s.begin());
+		};
+		trim(left);
+		trim(right);
+
+		// Parse the value.
+		double value = atof(right.c_str());
+		data[left] = value;
+
+		// Verbose.
+		std::cerr << ".." << left << ".. => " << value << std::endl; 
+	}
+	std::cerr << "Loaded " << data.size() << " entries!" << std::endl;
+}
+
+bool InjectedCardinalities::empty() const {
+	return data.empty();
+}
+
+std::unordered_map<std::string, double>& InjectedCardinalities::GetData() {
+	return data;
+}
+
+void InjectedCardinalitiesSetting::SetLocal(ClientContext &context, const Value &input) {
+	auto &config = ClientConfig::GetConfig(context);
+	auto parameter = input.ToString();
+	config.injected_cardinalities_file = parameter;
+	config.injected_cardinalities = InjectedCardinalities(config.injected_cardinalities_file);
+}
+
+void InjectedCardinalitiesSetting::ResetLocal(ClientContext &context) {
+	ClientConfig::GetConfig(context).injected_cardinalities_file = ClientConfig().injected_cardinalities_file;
+	ClientConfig::GetConfig(context).injected_cardinalities = InjectedCardinalities(ClientConfig::GetConfig(context).injected_cardinalities_file);
+}
+
+Value InjectedCardinalitiesSetting::GetSetting(const ClientContext &context) {
+	auto &config = ClientConfig::GetConfig(context);
+	return Value(config.injected_cardinalities_file);
 }
 
 //===----------------------------------------------------------------------===//

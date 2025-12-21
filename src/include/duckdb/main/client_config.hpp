@@ -26,7 +26,23 @@ class PreparedStatementData;
 
 typedef std::function<PhysicalOperator &(ClientContext &context, PreparedStatementData &data)> get_result_collector_t;
 
+class InjectedCardinalities {
+	// The cardinality estimates.
+	std::unordered_map<string, double> data;
+public:
+	InjectedCardinalities() = default;
+	InjectedCardinalities(std::string input_file);
+	bool empty() const;
+	std::unordered_map<string, double>& GetData();
+};
+
 struct ClientConfig {
+	//! The file to read the injected cardinalities estimates from.
+	//! (empty = don't use estimates)
+	string injected_cardinalities_file;
+	//! The parachute stats.
+	InjectedCardinalities injected_cardinalities;
+
 	//! The home directory used by the system (if any)
 	string home_directory;
 	//! If the query profiler is enabled or not.
@@ -120,6 +136,10 @@ public:
 	static const ClientConfig &GetConfig(const ClientContext &context);
 
 	bool AnyVerification() const;
+
+	InjectedCardinalities GetInjectedCardinalities() {
+		return injected_cardinalities;
+	}
 
 	void SetUserVariable(const string &name, Value value);
 	bool GetUserVariable(const string &name, Value &result);

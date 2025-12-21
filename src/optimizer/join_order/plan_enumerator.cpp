@@ -137,7 +137,12 @@ unique_ptr<DPJoinNode> PlanEnumerator::CreateJoinTree(JoinRelationSet &set,
 	// need the filter info from the Neighborhood info.
 	auto cost = cost_model.ComputeCost(left, right);
 	auto result = make_uniq<DPJoinNode>(set, best_connection, left.set, right.set, cost);
-	result->cardinality = cost_model.cardinality_estimator.EstimateCardinalityWithSet<idx_t>(set, query_graph_manager.relation_manager.GetRelationStats());
+	result->cardinality = cost_model
+		.cardinality_estimator
+		.EstimateCardinalityWithSet<idx_t>(
+			set,
+			query_graph_manager
+		);
 	return result;
 }
 
