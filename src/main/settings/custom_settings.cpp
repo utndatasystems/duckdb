@@ -34,6 +34,7 @@
 
 // Needed for injected cardinalities.
 #include <fstream>
+#include <cassert>
 
 namespace duckdb {
 
