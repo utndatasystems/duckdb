@@ -12,7 +12,6 @@
 
 #include <math.h>
 
-#include <fstream>
 #include <iostream>
 
 namespace duckdb {
@@ -416,9 +415,10 @@ double CardinalityEstimator::EstimateCardinalityWithSet(JoinRelationSet &new_set
 	).GetInjectedCardinalities();
 	bool should_inject = (!injected_cardinalities_file.empty());
 
-
 	// Should we inject?
 	if (should_inject) {
+		std::cerr << "[duckdb] @@@ should_inject=" << should_inject << std::endl;
+
 		// Get the table names.
 		// TODO: Store this once in the cardinality estimator.
 		// TODO: There's already such a structure, but I don't think it's up-to-date.
