@@ -417,8 +417,6 @@ double CardinalityEstimator::EstimateCardinalityWithSet(JoinRelationSet &new_set
 
 	// Should we inject?
 	if (should_inject) {
-		std::cerr << "[duckdb] @@@ should_inject=" << should_inject << std::endl;
-
 		// Get the table names.
 		// TODO: Store this once in the cardinality estimator.
 		// TODO: There's already such a structure, but I don't think it's up-to-date.
@@ -426,22 +424,22 @@ double CardinalityEstimator::EstimateCardinalityWithSet(JoinRelationSet &new_set
 		// TODO: Maybe put them into the stats? But we need this function of `ToStringWithTableNames`.
 		auto table_names = getTableNames();
 		auto new_set_str = new_set.ToStringWithTableNames(table_names);
-		std::cerr << "hmm: " << new_set.ToString() << std::endl;
-		std::cerr << "[EstimateCardinalityWithSet] new_set=" << new_set_str << std::endl;
+		// std::cerr << "hmm: " << new_set.ToString() << std::endl;
+		// std::cerr << "[EstimateCardinalityWithSet] new_set=" << new_set_str << std::endl;
 
 		auto injected = injected_cardinalities.GetCardinality(new_set_str);
 		assert(injected != -1);
 
-		std::cerr << "-> injected CSV value = " << injected << std::endl;
+		// std::cerr << "-> injected CSV value = " << injected << std::endl;
 		return injected;
 	}
 
-	std::cerr << "HMMMMMM default case!" << std::endl;
+	// std::cerr << "HMMMMMM default case!" << std::endl;
 
 	// Default case.
 	if (relation_set_2_cardinality.find(new_set.ToString()) != relation_set_2_cardinality.end()) {
 		auto ret = relation_set_2_cardinality[new_set.ToString()].cardinality_before_filters;
-		std::cerr << "-> " << ret << std::endl; 
+		// std::cerr << "-> " << ret << std::endl; 
 		return relation_set_2_cardinality[new_set.ToString()].cardinality_before_filters;
 	}
 
@@ -452,7 +450,7 @@ double CardinalityEstimator::EstimateCardinalityWithSet(JoinRelationSet &new_set
 	double result = numerator / denom.denominator;
 	auto new_entry = CardinalityHelper(result);
 	relation_set_2_cardinality[new_set.ToString()] = new_entry;
-	std::cerr << "-> " << result << std::endl; 
+	// std::cerr << "-> " << result << std::endl; 
 	return result;
 }
 
