@@ -29,11 +29,13 @@ typedef std::function<PhysicalOperator &(ClientContext &context, PreparedStateme
 class InjectedCardinalities {
 	// The cardinality estimates.
 	std::unordered_map<string, double> data;
+	// Canonicalize "[A, B, C]" → sorted "[A, B, C]"
+	static std::string CanonicalizeKey(const std::string &key);
 public:
 	InjectedCardinalities() = default;
 	InjectedCardinalities(std::string input_file);
-	bool empty() const;
-	std::unordered_map<string, double>& GetData();
+	bool IsEmpty() const;
+	double GetCardinality(std::string set_desc);
 };
 
 struct ClientConfig {

@@ -12,6 +12,7 @@
 
 #include <math.h>
 
+// Needed for injected cardinalities.
 #include <iostream>
 
 namespace duckdb {
@@ -399,10 +400,9 @@ template <>
 double CardinalityEstimator::EstimateCardinalityWithSet(JoinRelationSet &new_set, QueryGraphManager& query_graph_manager) {
 	auto getTableNames = [&query_graph_manager]() {
 		std::vector<std::string> table_names;
-		for (auto& elem :  query_graph_manager.relation_manager.GetRelationStats()) {
+		for (auto& elem : query_graph_manager.relation_manager.GetRelationStats()) {
 			table_names.push_back(elem.table_name);
 		}
-		std::sort(table_names.begin(), table_names.end());
 		return table_names;
 	};
 
@@ -426,15 +426,17 @@ double CardinalityEstimator::EstimateCardinalityWithSet(JoinRelationSet &new_set
 		// TODO: Maybe put them into the stats? But we need this function of `ToStringWithTableNames`.
 		auto table_names = getTableNames();
 		auto new_set_str = new_set.ToStringWithTableNames(table_names);
+		std::cerr << "hmm: " << new_set.ToString() << std::endl;
 		std::cerr << "[EstimateCardinalityWithSet] new_set=" << new_set_str << std::endl;
 
-		auto it = injected_cardinalities.GetData().find(new_set_str);
-		if (it != injected_cardinalities.GetData().end()) {
-			double injected_value = it->second;
-			std::cerr << "-> injected CSV value = " << injected_value << std::endl;
-			return injected_value;
-		}
+		auto injected = injected_cardinalities.GetCardinality(new_set_str);
+		assert(injected != -1);
+
+		std::cerr << "-> injected CSV value = " << injected << std::endl;
+		return injected;
 	}
+
+	std::cerr << "HMMMMMM default case!" << std::endl;
 
 	// Default case.
 	if (relation_set_2_cardinality.find(new_set.ToString()) != relation_set_2_cardinality.end()) {
