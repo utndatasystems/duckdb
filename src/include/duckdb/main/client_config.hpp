@@ -46,6 +46,8 @@ struct ClientConfig {
 	string injected_cardinalities_file;
 	//! The parachute stats.
 	InjectedCardinalities injected_cardinalities;
+	//! A parenthesized join tree over relation aliases, e.g. ((mc ci) (t rt)).
+	string injected_join_order;
 
 	//! The home directory used by the system (if any)
 	string home_directory;

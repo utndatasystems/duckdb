@@ -1383,6 +1383,23 @@ Value InjectedCardinalitiesSetting::GetSetting(const ClientContext &context) {
 	return Value(config.injected_cardinalities_file);
 }
 
+//===----------------------------------------------------------------------===//
+// Injected Join Order Input
+//===----------------------------------------------------------------------===//
+void InjectedJoinOrderSetting::SetLocal(ClientContext &context, const Value &input) {
+	auto &config = ClientConfig::GetConfig(context);
+	config.injected_join_order = input.ToString();
+}
+
+void InjectedJoinOrderSetting::ResetLocal(ClientContext &context) {
+	ClientConfig::GetConfig(context).injected_join_order = ClientConfig().injected_join_order;
+}
+
+Value InjectedJoinOrderSetting::GetSetting(const ClientContext &context) {
+	auto &config = ClientConfig::GetConfig(context);
+	return Value(config.injected_join_order);
+}
+
 // Log Query Path
 //===----------------------------------------------------------------------===//
 void LogQueryPathSetting::OnSet(SettingCallbackInfo &info, Value &input) {

@@ -1,13 +1,106 @@
 #include "duckdb/optimizer/join_order/plan_enumerator.hpp"
 
 #include "duckdb/main/client_context.hpp"
+#include "duckdb/common/exception.hpp"
+#include "duckdb/common/string_util.hpp"
 #include "duckdb/optimizer/join_order/join_node.hpp"
 #include "duckdb/optimizer/join_order/query_graph_manager.hpp"
 #include "duckdb/main/settings.hpp"
 
+#include <cctype>
 #include <cmath>
+#include <functional>
 
 namespace duckdb {
+
+namespace {
+
+struct InjectedJoinOrderNode {
+	explicit InjectedJoinOrderNode(string alias_p) : alias(std::move(alias_p)) {
+	}
+	InjectedJoinOrderNode(unique_ptr<InjectedJoinOrderNode> left_p, unique_ptr<InjectedJoinOrderNode> right_p)
+	    : left(std::move(left_p)), right(std::move(right_p)) {
+	}
+
+	bool IsLeaf() const {
+		return !left && !right;
+	}
+
+	string alias;
+	unique_ptr<InjectedJoinOrderNode> left;
+	unique_ptr<InjectedJoinOrderNode> right;
+};
+
+class InjectedJoinOrderParser {
+public:
+	explicit InjectedJoinOrderParser(const string &input_p) : input(input_p) {
+	}
+
+	unique_ptr<InjectedJoinOrderNode> Parse() {
+		auto result = ParseNode();
+		SkipWhitespace();
+		if (pos != input.size()) {
+			throw InvalidInputException(StringUtil::Format(
+			    "Unexpected trailing input in injected_join_order near: %s", input.substr(pos)));
+		}
+		return result;
+	}
+
+private:
+	unique_ptr<InjectedJoinOrderNode> ParseNode() {
+		SkipWhitespace();
+		if (pos >= input.size()) {
+			throw InvalidInputException("Unexpected end of injected_join_order");
+		}
+		if (input[pos] == '(') {
+			pos++;
+			auto left = ParseNode();
+			auto right = ParseNode();
+			SkipWhitespace();
+			if (pos >= input.size() || input[pos] != ')') {
+				throw InvalidInputException(StringUtil::Format(
+				    "Expected ')' in injected_join_order near: %s", input.substr(pos)));
+			}
+			pos++;
+			return make_uniq<InjectedJoinOrderNode>(std::move(left), std::move(right));
+		}
+		auto start = pos;
+		while (pos < input.size() && !std::isspace(static_cast<unsigned char>(input[pos])) && input[pos] != '(' &&
+		       input[pos] != ')') {
+			pos++;
+		}
+		if (start == pos) {
+			throw InvalidInputException(StringUtil::Format(
+			    "Expected relation alias in injected_join_order near: %s", input.substr(pos)));
+		}
+		return make_uniq<InjectedJoinOrderNode>(input.substr(start, pos - start));
+	}
+
+	void SkipWhitespace() {
+		while (pos < input.size() && std::isspace(static_cast<unsigned char>(input[pos]))) {
+			pos++;
+		}
+	}
+
+private:
+	const string &input;
+	idx_t pos = 0;
+};
+
+static void CollectInjectedJoinOrderLeaves(const InjectedJoinOrderNode &node, vector<string> &aliases) {
+	if (node.IsLeaf()) {
+		aliases.push_back(node.alias);
+		return;
+	}
+	CollectInjectedJoinOrderLeaves(*node.left, aliases);
+	CollectInjectedJoinOrderLeaves(*node.right, aliases);
+}
+
+static string FormatAliases(const vector<string> &aliases) {
+	return StringUtil::Join(aliases, ", ");
+}
+
+} // namespace
 
 static vector<unordered_set<idx_t>> AddSuperSets(const vector<unordered_set<idx_t>> &current,
                                                  const vector<idx_t> &all_neighbors) {
@@ -448,6 +541,90 @@ void PlanEnumerator::SolveJoinOrderApproximately() {
 	}
 }
 
+bool PlanEnumerator::TrySolveInjectedJoinOrder(bool force_no_cross_product) {
+	auto injected_join_order = InjectedJoinOrderSetting::GetSetting(query_graph_manager.context).ToString();
+	if (injected_join_order.empty()) {
+		return false;
+	}
+
+	InjectedJoinOrderParser parser(injected_join_order);
+	auto parsed_order = parser.Parse();
+
+	auto relation_aliases = query_graph_manager.relation_manager.GetRelationAliasNames();
+	unordered_map<string, idx_t> alias_to_relation_id;
+	for (idx_t i = 0; i < relation_aliases.size(); i++) {
+		auto &alias = relation_aliases[i];
+		if (alias.empty()) {
+			throw InvalidInputException("Injected join order requires every relation to have a non-empty alias");
+		}
+		if (alias_to_relation_id.find(alias) != alias_to_relation_id.end()) {
+			throw InvalidInputException(StringUtil::Format(
+			    "Injected join order requires unique relation aliases, but '%s' appears more than once", alias));
+		}
+		alias_to_relation_id[alias] = i;
+	}
+
+	vector<string> mentioned_aliases;
+	CollectInjectedJoinOrderLeaves(*parsed_order, mentioned_aliases);
+	if (mentioned_aliases.size() != relation_aliases.size()) {
+		throw InvalidInputException(StringUtil::Format(
+		    "Injected join order must mention each relation exactly once. Expected %llu aliases (%s), but got %llu (%s)",
+		    static_cast<unsigned long long>(relation_aliases.size()), FormatAliases(relation_aliases),
+		    static_cast<unsigned long long>(mentioned_aliases.size()), FormatAliases(mentioned_aliases)));
+	}
+
+	unordered_set<idx_t> seen_relations;
+	std::function<DPJoinNode &(const InjectedJoinOrderNode &)> build_plan =
+	    [&](const InjectedJoinOrderNode &node) -> DPJoinNode & {
+		if (node.IsLeaf()) {
+			auto entry = alias_to_relation_id.find(node.alias);
+			if (entry == alias_to_relation_id.end()) {
+				throw InvalidInputException(StringUtil::Format(
+				    "Relation alias '%s' from injected_join_order is not part of this query", node.alias));
+			}
+			if (!seen_relations.insert(entry->second).second) {
+				throw InvalidInputException(StringUtil::Format(
+				    "Relation alias '%s' appears more than once in injected_join_order", node.alias));
+			}
+			auto &leaf_set = query_graph_manager.set_manager.GetJoinRelation(entry->second);
+			auto leaf_plan = plans.find(leaf_set);
+			D_ASSERT(leaf_plan != plans.end());
+			return *leaf_plan->second;
+		}
+
+		auto &left_plan = build_plan(*node.left);
+		auto &right_plan = build_plan(*node.right);
+		auto &combined_set = query_graph_manager.set_manager.Union(left_plan.set, right_plan.set);
+
+		auto connections = query_graph.GetConnections(left_plan.set, right_plan.set);
+		if (connections.empty()) {
+			if (force_no_cross_product) {
+				throw InvalidInputException(StringUtil::Format(
+				    "Injected join order requires a cross-product between %s and %s, but 'force_no_cross_product' "
+				    "PRAGMA is enabled",
+				    left_plan.set.ToString(), right_plan.set.ToString()));
+			}
+			query_graph_manager.CreateQueryGraphCrossProduct(left_plan.set, right_plan.set);
+			connections = query_graph.GetConnections(left_plan.set, right_plan.set);
+		}
+		if (connections.empty()) {
+			throw InternalException(StringUtil::Format(
+			    "Injected join order could not create a connection between %s and %s", left_plan.set.ToString(),
+			    right_plan.set.ToString()));
+		}
+
+		auto new_plan = CreateJoinTree(combined_set, connections, left_plan, right_plan);
+		plans[combined_set] = std::move(new_plan);
+		return *plans[combined_set];
+	};
+
+	auto &root_plan = build_plan(*parsed_order);
+	if (root_plan.set.count != relation_aliases.size() || seen_relations.size() != relation_aliases.size()) {
+		throw InvalidInputException("Injected join order must cover every relation in the query exactly once");
+	}
+	return true;
+}
+
 void PlanEnumerator::InitLeafPlans() {
 	// First we initialize each of the single-node plans with themselves and with their cardinalities these are the leaf
 	// nodes of the join tree NOTE: we can just use pointers to JoinRelationSet* here because the GetJoinRelation
@@ -476,6 +653,9 @@ void PlanEnumerator::InitLeafPlans() {
 // https://db.in.tum.de/teaching/ws1415/queryopt/chapter3.pdf?lang=de
 void PlanEnumerator::SolveJoinOrder() {
 	bool force_no_cross_product = Settings::Get<DebugForceNoCrossProductSetting>(query_graph_manager.context);
+	if (TrySolveInjectedJoinOrder(force_no_cross_product)) {
+		return;
+	}
 	// first try to solve the join order exactly
 	if (query_graph_manager.relation_manager.NumRelations() >= THRESHOLD_TO_SWAP_TO_APPROXIMATE) {
 		SolveJoinOrderApproximately();

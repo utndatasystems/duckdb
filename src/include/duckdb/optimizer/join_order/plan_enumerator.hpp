@@ -79,6 +79,8 @@ private:
 	bool SolveJoinOrderExactly();
 	//! Solve the join order approximately using a greedy algorithm
 	void SolveJoinOrderApproximately();
+	//! Use an injected join tree if configured. Returns true if a full plan was created.
+	bool TrySolveInjectedJoinOrder(bool force_no_cross_product);
 };
 
 } // namespace duckdb

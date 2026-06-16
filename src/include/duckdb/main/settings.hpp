@@ -1094,6 +1094,17 @@ struct InjectedCardinalitiesSetting {
 	static Value GetSetting(const ClientContext &context);
 };
 
+struct InjectedJoinOrderSetting {
+	using RETURN_TYPE = string;
+	static constexpr const char *Name = "injected_join_order";
+	static constexpr const char *Description =
+	    "A parenthesized join tree over relation aliases, e.g. ((mc ci) (t rt))";
+	static constexpr const char *InputType = "VARCHAR";
+	static void SetLocal(ClientContext &context, const Value &parameter);
+	static void ResetLocal(ClientContext &context);
+	static Value GetSetting(const ClientContext &context);
+};
+
 struct IntegerDivisionSetting {
 	using RETURN_TYPE = bool;
 	static constexpr const char *Name = "integer_division";

@@ -157,6 +157,7 @@ static const ConfigurationOption internal_options[] = {
     DUCKDB_SETTING(IndexScanMaxCountSetting),
     DUCKDB_SETTING_CALLBACK(IndexScanPercentageSetting),
 		DUCKDB_LOCAL(InjectedCardinalitiesSetting),
+		DUCKDB_LOCAL(InjectedJoinOrderSetting),
     DUCKDB_SETTING(IntegerDivisionSetting),
     DUCKDB_SETTING_CALLBACK(LambdaSyntaxSetting),
     DUCKDB_SETTING(LateMaterializationMaxRowsSetting),
