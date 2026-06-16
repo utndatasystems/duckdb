@@ -1619,13 +1619,17 @@ InsertionOrderPreservingMap<string> PhysicalHashJoin::ParamsToString() const {
 
 	string condition_info;
 	for (idx_t i = 0; i < conditions.size(); i++) {
-		auto &join_condition = conditions[i];
 		if (i > 0) {
 			condition_info += "\n";
 		}
-		condition_info +=
-		    StringUtil::Format("%s %s %s", join_condition.left->GetName(),
-		                       ExpressionTypeToOperator(join_condition.comparison), join_condition.right->GetName());
+		if (i < condition_display_strings.size()) {
+			condition_info += condition_display_strings[i];
+		} else {
+			auto &join_condition = conditions[i];
+			condition_info += StringUtil::Format("%s %s %s", join_condition.left->GetName(),
+			                                     ExpressionTypeToOperator(join_condition.comparison),
+			                                     join_condition.right->GetName());
+		}
 	}
 	result["Conditions"] = condition_info;
 
