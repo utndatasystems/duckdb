@@ -1083,6 +1083,17 @@ struct IndexScanPercentageSetting {
 	static void OnSet(SettingCallbackInfo &info, Value &input);
 };
 
+struct InjectedCardinalitiesSetting {
+	using RETURN_TYPE = string;
+	static constexpr const char *Name = "injected_cardinalities_file";
+	static constexpr const char *Description =
+			"The file with the cardinality estimates.";
+	static constexpr const char *InputType = "VARCHAR";
+	static void SetLocal(ClientContext &context, const Value &parameter);
+	static void ResetLocal(ClientContext &context);
+	static Value GetSetting(const ClientContext &context);
+};
+
 struct IntegerDivisionSetting {
 	using RETURN_TYPE = bool;
 	static constexpr const char *Name = "integer_division";

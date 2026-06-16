@@ -46,6 +46,8 @@ public:
 	vector<Value> parameters;
 	//! The set of named input parameters for the table function
 	named_parameter_map_t named_parameters;
+	//! Debug-only alias for base table bindings when available
+	string base_table_alias;
 	//! The set of named input table types for the table-in table-out function
 	vector<LogicalType> input_table_types;
 	//! The set of named input table names for the table-in table-out function

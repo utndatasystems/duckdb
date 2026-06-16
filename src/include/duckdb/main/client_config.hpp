@@ -28,7 +28,27 @@ class PreparedStatementData;
 typedef std::function<unique_ptr<PhysicalOperator>(ClientContext &context, PreparedStatementData &data)>
     get_result_collector_t;
 
+class InjectedCardinalities {
+	// The cardinality estimates.
+	std::unordered_map<string, double> data;
+	// Canonicalize "[A, B, C]" → sorted "[A, B, C]"
+	static std::string CanonicalizeKey(const std::string &key);
+public:
+	InjectedCardinalities() = default;
+	InjectedCardinalities(std::string input_file);
+	bool IsEmpty() const;
+	double GetCardinality(std::string set_desc);
+};
+
 struct ClientConfig {
+	//! The file to read the injected cardinalities estimates from.
+	//! (empty = don't use estimates)
+	string injected_cardinalities_file;
+	//! The parachute stats.
+	InjectedCardinalities injected_cardinalities;
+
+	//! The home directory used by the system (if any)
+	string home_directory;
 	//! If the query profiler is enabled or not.
 	bool enable_profiler = false;
 	//! If detailed query profiling is enabled
@@ -110,6 +130,10 @@ public:
 	static const ClientConfig &GetConfig(const ClientContext &context);
 
 	bool AnyVerification() const;
+
+	InjectedCardinalities GetInjectedCardinalities() {
+		return injected_cardinalities;
+	}
 
 	void SetUserVariable(const String &name, Value value);
 	bool GetUserVariable(const string &name, Value &result);

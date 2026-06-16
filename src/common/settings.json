@@ -736,6 +736,13 @@
         ]
     },
     {
+        "name": "injected_cardinalities_file",
+        "description": "The file to read the cardinality estimates from (default: empty, i.e., don't inject custom estimates)",
+        "type": "VARCHAR",
+        "scope": "local",
+        "custom_implementation": true
+    },
+    {
         "name": "integer_division",
         "description": "Whether or not the / operator defaults to integer division, or to floating point division",
         "type": "BOOLEAN",

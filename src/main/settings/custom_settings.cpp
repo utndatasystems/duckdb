@@ -41,6 +41,10 @@
 
 #include "mbedtls_wrapper.hpp"
 
+// Needed for injected cardinalities.
+#include <fstream>
+#include <cassert>
+
 namespace duckdb {
 
 constexpr const char *LoggingMode::Name;
@@ -1284,6 +1288,101 @@ void IndexScanPercentageSetting::OnSet(SettingCallbackInfo &, Value &input) {
 }
 
 //===----------------------------------------------------------------------===//
+// Injected Cardinality Estimates Input File
+//===----------------------------------------------------------------------===//
+std::string InjectedCardinalities::CanonicalizeKey(const std::string &key) {
+	// Assumes `[A, B, C]`-format.
+	assert(key.size() >= 2);
+	assert(key.front() == '[' && key.back() == ']');
+
+	// Collect the table names.
+	std::vector<std::string> elems;
+	std::string inner = key.substr(1, key.size() - 2);
+
+	// Parse.
+	size_t pos = 0;
+	while (true) {
+		size_t comma = inner.find(", ", pos);
+		if (comma == std::string::npos) {
+			elems.push_back(inner.substr(pos));
+			break;
+		}
+		elems.push_back(inner.substr(pos, comma - pos));
+		pos = comma + 2;
+	}
+
+	// Sort.
+	std::sort(elems.begin(), elems.end());
+
+	// Build.
+	std::string result = "[";
+	for (size_t i = 0; i < elems.size(); ++i) {
+		if (i) result += ", ";
+		result += elems[i];
+	}
+	result += "]";
+	return result;
+}
+
+InjectedCardinalities::InjectedCardinalities(std::string input_file) {
+	// No input file? Then clear.
+	if (input_file.empty()) {
+		data.clear();
+		return;
+	}
+
+	// Open the file.
+	std::ifstream in(input_file);
+	assert(in.is_open());
+
+	// And read.
+	std::string line;
+	while (std::getline(in, line)) {
+		// Expected: `[a, b, c] # 1234.0`.
+		auto hash_pos = line.find(" # ");
+		assert(hash_pos != std::string::npos);
+
+		string left = CanonicalizeKey(line.substr(0, hash_pos));
+		string right = line.substr(hash_pos + 3);
+
+		// Parse the value.
+		double value = atof(right.c_str());
+		data[left] = value;
+
+		// Verbose.
+		std::cerr << ".." << left << ".. => " << value << std::endl;
+	}
+	std::cerr << "Loaded " << data.size() << " entries!" << std::endl;
+}
+
+bool InjectedCardinalities::IsEmpty() const {
+	return data.empty();
+}
+
+double InjectedCardinalities::GetCardinality(std::string set_desc) {
+	// NOTE: This assumes the canonical form: `[A, B, C]`. We have to canonicalize it first, i.e., sort the table names.
+	// std::cerr << "[GetCardinality] canonicalized=" << CanonicalizeKey(set_desc) << std::endl;
+	auto it = data.find(CanonicalizeKey(set_desc));
+	return (it == data.end()) ? -1 : it->second;
+}
+
+void InjectedCardinalitiesSetting::SetLocal(ClientContext &context, const Value &input) {
+	auto &config = ClientConfig::GetConfig(context);
+	auto parameter = input.ToString();
+	config.injected_cardinalities_file = parameter;
+	config.injected_cardinalities = InjectedCardinalities(config.injected_cardinalities_file);
+}
+
+void InjectedCardinalitiesSetting::ResetLocal(ClientContext &context) {
+	ClientConfig::GetConfig(context).injected_cardinalities_file = ClientConfig().injected_cardinalities_file;
+	ClientConfig::GetConfig(context).injected_cardinalities = InjectedCardinalities(ClientConfig::GetConfig(context).injected_cardinalities_file);
+}
+
+Value InjectedCardinalitiesSetting::GetSetting(const ClientContext &context) {
+	auto &config = ClientConfig::GetConfig(context);
+	return Value(config.injected_cardinalities_file);
+}
+
 // Log Query Path
 //===----------------------------------------------------------------------===//
 void LogQueryPathSetting::OnSet(SettingCallbackInfo &info, Value &input) {

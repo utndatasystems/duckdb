@@ -12,10 +12,35 @@
 
 namespace duckdb {
 
+static string GetBaseTableAlias(LogicalOperator &op) {
+	auto current = &op;
+	while (current) {
+		if (current->type == LogicalOperatorType::LOGICAL_GET) {
+			auto &get = current->Cast<LogicalGet>();
+			return get.base_table_alias;
+		}
+		if (current->children.size() != 1) {
+			break;
+		}
+		current = current->children[0].get();
+	}
+	return string();
+}
+
 const vector<RelationStats> RelationManager::GetRelationStats() {
 	vector<RelationStats> ret;
 	for (idx_t i = 0; i < relations.size(); i++) {
 		ret.push_back(relations[i]->stats);
+	}
+	return ret;
+}
+
+vector<string> RelationManager::GetRelationAliasNames() const {
+	vector<string> ret;
+	for (idx_t i = 0; i < relations.size(); i++) {
+		auto &relation = *relations[i];
+		auto alias = GetBaseTableAlias(relation.op);
+		ret.push_back(alias.empty() ? relation.stats.table_name : alias);
 	}
 	return ret;
 }

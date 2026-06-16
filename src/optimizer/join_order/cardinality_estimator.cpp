@@ -8,8 +8,12 @@
 #include "duckdb/planner/expression_iterator.hpp"
 #include "duckdb/planner/operator/logical_comparison_join.hpp"
 #include "duckdb/storage/data_table.hpp"
+#include "duckdb/main/settings.hpp"
 
 #include <math.h>
+
+// Needed for injected cardinalities.
+#include <iostream>
 
 namespace duckdb {
 
@@ -408,8 +412,45 @@ DenomInfo CardinalityEstimator::GetDenominator(JoinRelationSet &set) {
 // comparison types like <, <=, >, >=, !=, but only a "penalty" was introduced, and the calculated cardinality is not
 // based on stats (see CalculateUpdatedDenom()).
 template <>
-double CardinalityEstimator::EstimateCardinalityWithSet(JoinRelationSet &new_set) {
+double CardinalityEstimator::EstimateCardinalityWithSet(JoinRelationSet &new_set, QueryGraphManager &query_graph_manager) {
+	auto getRelationAliases = [&query_graph_manager]() {
+		return query_graph_manager.relation_manager.GetRelationAliasNames();
+	};
+
+	// Check for the injected cardinalities option.
+	auto injected_cardinalities_file = InjectedCardinalitiesSetting::GetSetting(
+		query_graph_manager.context
+	).ToString();
+	auto injected_cardinalities = ClientConfig::GetConfig(
+		query_graph_manager.context
+	).GetInjectedCardinalities();
+	bool should_inject = (!injected_cardinalities_file.empty());
+
+	// Should we inject?
+	if (should_inject) {
+		// Get the relation aliases.
+		// TODO: Store this once in the cardinality estimator.
+		// TODO: There's already such a structure, but I don't think it's up-to-date.
+		// TODO: Moreover, I don't know when it's reset.
+		// TODO: Maybe put them into the stats? But we need this function of `ToStringWithAlias`.
+		auto relation_aliases = getRelationAliases();
+		auto new_set_str = new_set.ToStringWithAlias(relation_aliases);
+		// std::cerr << "hmm: " << new_set.ToString() << std::endl;
+		// std::cerr << "[EstimateCardinalityWithSet] new_set=" << new_set_str << std::endl;
+
+		auto injected = injected_cardinalities.GetCardinality(new_set_str);
+		assert(injected != -1);
+
+		// std::cerr << "-> injected CSV value = " << injected << std::endl;
+		return injected;
+	}
+
+	// std::cerr << "HMMMMMM default case!" << std::endl;
+
+	// Default case.
 	if (relation_set_2_cardinality.find(new_set.ToString()) != relation_set_2_cardinality.end()) {
+		auto ret = relation_set_2_cardinality[new_set.ToString()].cardinality_before_filters;
+		// std::cerr << "-> " << ret << std::endl;
 		return relation_set_2_cardinality[new_set.ToString()].cardinality_before_filters;
 	}
 
@@ -422,12 +463,13 @@ double CardinalityEstimator::EstimateCardinalityWithSet(JoinRelationSet &new_set
 	double result = numerator / denom.denominator;
 	auto new_entry = CardinalityHelper(result);
 	relation_set_2_cardinality[new_set.ToString()] = new_entry;
+	// std::cerr << "-> " << result << std::endl;
 	return result;
 }
 
 template <>
-idx_t CardinalityEstimator::EstimateCardinalityWithSet(JoinRelationSet &new_set) {
-	auto cardinality_as_double = EstimateCardinalityWithSet<double>(new_set);
+idx_t CardinalityEstimator::EstimateCardinalityWithSet(JoinRelationSet &new_set, QueryGraphManager& query_graph_manager) {
+	auto cardinality_as_double = EstimateCardinalityWithSet<double>(new_set, query_graph_manager);
 	auto max = NumericLimits<idx_t>::Maximum();
 	if (cardinality_as_double >= (double)max) {
 		return max;

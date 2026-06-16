@@ -20,6 +20,7 @@ struct JoinRelationSet {
 	}
 
 	string ToString() const;
+	string ToStringWithAlias(std::vector<string> &relation_aliases);
 
 	unsafe_unique_array<idx_t> relations;
 	idx_t count;
