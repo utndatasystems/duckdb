@@ -262,6 +262,7 @@ BoundStatement Binder::Bind(BaseTableRef &ref) {
 		    make_uniq<LogicalGet>(table_index, scan_function, std::move(bind_data), std::move(return_types),
 		                          std::move(return_names), std::move(virtual_columns));
 		auto table_entry = logical_get->GetTable();
+		logical_get->relation_name = ref.alias.empty() ? table.name : ref.alias;
 		auto &col_ids = logical_get->GetMutableColumnIds();
 		if (!table_entry) {
 			bind_context.AddBaseTable(table_index, ref.alias, table_names, table_types, col_ids, ref.table_name);

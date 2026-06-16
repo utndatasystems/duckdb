@@ -1,6 +1,5 @@
 #include "duckdb/execution/operator/join/physical_comparison_join.hpp"
 
-#include "duckdb/catalog/catalog_entry/table_catalog_entry.hpp"
 #include "duckdb/common/enum_util.hpp"
 #include "duckdb/common/unordered_map.hpp"
 #include "duckdb/planner/expression/bound_columnref_expression.hpp"
@@ -14,8 +13,7 @@ namespace {
 void CollectRelationNames(const LogicalOperator &op, unordered_map<idx_t, string> &relation_names) {
 	if (op.type == LogicalOperatorType::LOGICAL_GET) {
 		auto &get = op.Cast<LogicalGet>();
-		auto table = get.GetTable();
-		relation_names[get.table_index] = table ? table->name : get.GetName();
+		relation_names[get.table_index] = !get.relation_name.empty() ? get.relation_name : get.GetName();
 	}
 	for (auto &child : op.children) {
 		CollectRelationNames(*child, relation_names);
@@ -26,20 +24,70 @@ void CollectRelationNames(const LogicalOperator &op, unordered_map<idx_t, string
 	}
 }
 
+vector<string> GetOutputNames(const LogicalOperator &op) {
+	if (op.type == LogicalOperatorType::LOGICAL_GET) {
+		auto &get = op.Cast<LogicalGet>();
+		vector<string> result;
+		if (get.projection_ids.empty()) {
+			for (auto &column_id : get.GetColumnIds()) {
+				result.push_back(get.GetColumnName(column_id));
+			}
+		} else {
+			for (auto projection_id : get.projection_ids) {
+				result.push_back(get.names[projection_id]);
+			}
+		}
+		if (!get.projected_input.empty() && !get.children.empty()) {
+			auto child_names = GetOutputNames(*get.children[0]);
+			for (auto entry : get.projected_input) {
+				result.push_back(child_names[entry]);
+			}
+		}
+		return result;
+	}
+	if (op.type == LogicalOperatorType::LOGICAL_PROJECTION) {
+		vector<string> result;
+		result.reserve(op.expressions.size());
+		for (auto &expr : op.expressions) {
+			result.push_back(expr->GetName());
+		}
+		return result;
+	}
+	vector<ColumnBinding> child_bindings;
+	vector<string> child_names;
+	for (auto &child : op.children) {
+		auto names = GetOutputNames(*child);
+		auto bindings = child->GetColumnBindings();
+		child_names.insert(child_names.end(), names.begin(), names.end());
+		child_bindings.insert(child_bindings.end(), bindings.begin(), bindings.end());
+	}
+	vector<string> result;
+	auto &mutable_op = const_cast<LogicalOperator &>(op);
+	for (auto &binding : mutable_op.GetColumnBindings()) {
+		auto it = std::find(child_bindings.begin(), child_bindings.end(), binding);
+		if (it == child_bindings.end()) {
+			return {};
+		}
+		result.push_back(child_names[it - child_bindings.begin()]);
+	}
+	return result;
+}
+
 string FormatQualifiedExpression(const Expression &expr, const vector<ColumnBinding> &bindings,
+                                 const vector<string> &output_names,
                                  const unordered_map<idx_t, string> &relation_names) {
 	switch (expr.GetExpressionClass()) {
 	case ExpressionClass::BOUND_REF: {
 		auto &ref = expr.Cast<BoundReferenceExpression>();
-		if (ref.index >= bindings.size()) {
+		if (ref.index >= bindings.size() || ref.index >= output_names.size()) {
 			return expr.ToString();
 		}
 		auto binding = bindings[ref.index];
 		auto entry = relation_names.find(binding.table_index);
-		if (entry == relation_names.end() || expr.GetAlias().empty()) {
+		if (entry == relation_names.end() || output_names[ref.index].empty()) {
 			return expr.ToString();
 		}
-		return entry->second + "." + expr.GetAlias();
+		return entry->second + "." + output_names[ref.index];
 	}
 	case ExpressionClass::BOUND_COLUMN_REF: {
 		auto &ref = expr.Cast<BoundColumnRefExpression>();
@@ -55,11 +103,13 @@ string FormatQualifiedExpression(const Expression &expr, const vector<ColumnBind
 }
 
 string FormatQualifiedCondition(const JoinCondition &condition, const vector<ColumnBinding> &left_bindings,
-                                const vector<ColumnBinding> &right_bindings,
+                                const vector<string> &left_names, const vector<ColumnBinding> &right_bindings,
+                                const vector<string> &right_names,
                                 const unordered_map<idx_t, string> &relation_names) {
-	return StringUtil::Format("%s %s %s", FormatQualifiedExpression(*condition.left, left_bindings, relation_names),
+	return StringUtil::Format("%s %s %s",
+	                          FormatQualifiedExpression(*condition.left, left_bindings, left_names, relation_names),
 	                          ExpressionTypeToOperator(condition.comparison),
-	                          FormatQualifiedExpression(*condition.right, right_bindings, relation_names));
+	                          FormatQualifiedExpression(*condition.right, right_bindings, right_names, relation_names));
 }
 
 } // namespace
@@ -75,11 +125,13 @@ PhysicalComparisonJoin::PhysicalComparisonJoin(PhysicalPlan &physical_plan, Logi
 		CollectRelationNames(*op.children[1], relation_names);
 
 		auto left_bindings = op.children[0]->GetColumnBindings();
+		auto left_names = GetOutputNames(*op.children[0]);
 		auto right_bindings = op.children[1]->GetColumnBindings();
+		auto right_names = GetOutputNames(*op.children[1]);
 		condition_display_strings.reserve(conditions.size());
 		for (auto &condition : conditions) {
 			condition_display_strings.push_back(
-			    FormatQualifiedCondition(condition, left_bindings, right_bindings, relation_names));
+			    FormatQualifiedCondition(condition, left_bindings, left_names, right_bindings, right_names, relation_names));
 		}
 	}
 }
@@ -107,8 +159,6 @@ InsertionOrderPreservingMap<string> PhysicalComparisonJoin::ParamsToString() con
 }
 
 void PhysicalComparisonJoin::ReorderConditions(vector<JoinCondition> &conditions) {
-	// we reorder conditions so the ones with COMPARE_EQUAL occur first
-	// check if this is already the case
 	bool is_ordered = true;
 	bool seen_non_equal = false;
 	for (auto &cond : conditions) {
@@ -123,10 +173,8 @@ void PhysicalComparisonJoin::ReorderConditions(vector<JoinCondition> &conditions
 		}
 	}
 	if (is_ordered) {
-		// no need to re-order
 		return;
 	}
-	// gather lists of equal/other conditions
 	vector<JoinCondition> equal_conditions;
 	vector<JoinCondition> other_conditions;
 	for (auto &cond : conditions) {
@@ -138,7 +186,6 @@ void PhysicalComparisonJoin::ReorderConditions(vector<JoinCondition> &conditions
 		}
 	}
 	conditions.clear();
-	// reconstruct the sorted conditions
 	for (auto &cond : equal_conditions) {
 		conditions.push_back(std::move(cond));
 	}
@@ -149,26 +196,17 @@ void PhysicalComparisonJoin::ReorderConditions(vector<JoinCondition> &conditions
 
 void PhysicalComparisonJoin::ConstructEmptyJoinResult(JoinType join_type, bool has_null, DataChunk &input,
                                                       DataChunk &result) {
-	// empty hash table, special case
 	if (join_type == JoinType::ANTI) {
-		// anti join with empty hash table, NOP join
-		// return the input
 		D_ASSERT(input.ColumnCount() == result.ColumnCount());
 		result.Reference(input);
 	} else if (join_type == JoinType::MARK) {
-		// MARK join with empty hash table
 		D_ASSERT(result.ColumnCount() == input.ColumnCount() + 1);
 		auto &result_vector = result.data.back();
 		D_ASSERT(result_vector.GetType() == LogicalType::BOOLEAN);
-		// for every data vector, we just reference the child chunk
 		result.SetCardinality(input);
 		for (idx_t i = 0; i < input.ColumnCount(); i++) {
 			result.data[i].Reference(input.data[i]);
 		}
-		// for the MARK vector:
-		// if the HT has no NULL values (i.e. empty result set), return a vector that has false for every input
-		// entry if the HT has NULL values (i.e. result set had values, but all were NULL), return a vector that
-		// has NULL for every input entry
 		if (!has_null) {
 			auto bool_result = FlatVector::GetData<bool>(result_vector);
 			for (idx_t i = 0; i < result.size(); i++) {
@@ -178,13 +216,10 @@ void PhysicalComparisonJoin::ConstructEmptyJoinResult(JoinType join_type, bool h
 			FlatVector::Validity(result_vector).SetAllInvalid(result.size());
 		}
 	} else if (join_type == JoinType::LEFT || join_type == JoinType::OUTER || join_type == JoinType::SINGLE) {
-		// LEFT/FULL OUTER/SINGLE join and build side is empty
-		// for the LHS we reference the data
 		result.SetCardinality(input.size());
 		for (idx_t i = 0; i < input.ColumnCount(); i++) {
 			result.data[i].Reference(input.data[i]);
 		}
-		// for the RHS
 		for (idx_t k = input.ColumnCount(); k < result.ColumnCount(); k++) {
 			result.data[k].SetVectorType(VectorType::CONSTANT_VECTOR);
 			ConstantVector::SetNull(result.data[k], true);

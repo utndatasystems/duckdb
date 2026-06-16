@@ -241,6 +241,7 @@ void LogicalGet::Serialize(Serializer &serializer) const {
 	serializer.WriteProperty(200, "table_index", table_index);
 	serializer.WriteProperty(201, "returned_types", returned_types);
 	serializer.WriteProperty(202, "names", names);
+	serializer.WritePropertyWithDefault<string>(215, "relation_name", relation_name, string());
 	/* [Deleted] (vector<column_t>) "column_ids" */
 	serializer.WriteProperty(204, "projection_ids", projection_ids);
 	serializer.WriteProperty(205, "table_filters", table_filters);
@@ -268,6 +269,7 @@ unique_ptr<LogicalOperator> LogicalGet::Deserialize(Deserializer &deserializer) 
 	deserializer.ReadProperty(200, "table_index", result->table_index);
 	deserializer.ReadProperty(201, "returned_types", result->returned_types);
 	deserializer.ReadProperty(202, "names", result->names);
+	deserializer.ReadPropertyWithDefault<string>(215, "relation_name", result->relation_name);
 	deserializer.ReadPropertyWithDefault(203, "column_ids", legacy_column_ids);
 	deserializer.ReadProperty(204, "projection_ids", result->projection_ids);
 	deserializer.ReadProperty(205, "table_filters", result->table_filters);

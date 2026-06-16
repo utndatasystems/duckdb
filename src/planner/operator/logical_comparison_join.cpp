@@ -1,9 +1,8 @@
 #include "duckdb/planner/operator/logical_comparison_join.hpp"
-#include "duckdb/catalog/catalog_entry/table_catalog_entry.hpp"
+#include "duckdb/common/enum_util.hpp"
 #include "duckdb/common/unordered_map.hpp"
 #include "duckdb/planner/expression/bound_columnref_expression.hpp"
 #include "duckdb/planner/expression/bound_reference_expression.hpp"
-#include "duckdb/common/enum_util.hpp"
 #include "duckdb/planner/operator/logical_get.hpp"
 
 namespace duckdb {
@@ -13,8 +12,7 @@ namespace {
 void CollectRelationNames(const LogicalOperator &op, unordered_map<idx_t, string> &relation_names) {
 	if (op.type == LogicalOperatorType::LOGICAL_GET) {
 		auto &get = op.Cast<LogicalGet>();
-		auto table = get.GetTable();
-		relation_names[get.table_index] = table ? table->name : get.GetName();
+		relation_names[get.table_index] = !get.relation_name.empty() ? get.relation_name : get.GetName();
 	}
 	for (auto &child : op.children) {
 		CollectRelationNames(*child, relation_names);
@@ -25,20 +23,70 @@ void CollectRelationNames(const LogicalOperator &op, unordered_map<idx_t, string
 	}
 }
 
+vector<string> GetOutputNames(const LogicalOperator &op) {
+	if (op.type == LogicalOperatorType::LOGICAL_GET) {
+		auto &get = op.Cast<LogicalGet>();
+		vector<string> result;
+		if (get.projection_ids.empty()) {
+			for (auto &column_id : get.GetColumnIds()) {
+				result.push_back(get.GetColumnName(column_id));
+			}
+		} else {
+			for (auto projection_id : get.projection_ids) {
+				result.push_back(get.names[projection_id]);
+			}
+		}
+		if (!get.projected_input.empty() && !get.children.empty()) {
+			auto child_names = GetOutputNames(*get.children[0]);
+			for (auto entry : get.projected_input) {
+				result.push_back(child_names[entry]);
+			}
+		}
+		return result;
+	}
+	if (op.type == LogicalOperatorType::LOGICAL_PROJECTION) {
+		vector<string> result;
+		result.reserve(op.expressions.size());
+		for (auto &expr : op.expressions) {
+			result.push_back(expr->GetName());
+		}
+		return result;
+	}
+	vector<ColumnBinding> child_bindings;
+	vector<string> child_names;
+	for (auto &child : op.children) {
+		auto names = GetOutputNames(*child);
+		auto bindings = child->GetColumnBindings();
+		child_names.insert(child_names.end(), names.begin(), names.end());
+		child_bindings.insert(child_bindings.end(), bindings.begin(), bindings.end());
+	}
+	vector<string> result;
+	auto &mutable_op = const_cast<LogicalOperator &>(op);
+	for (auto &binding : mutable_op.GetColumnBindings()) {
+		auto it = std::find(child_bindings.begin(), child_bindings.end(), binding);
+		if (it == child_bindings.end()) {
+			return {};
+		}
+		result.push_back(child_names[it - child_bindings.begin()]);
+	}
+	return result;
+}
+
 string FormatQualifiedExpression(const Expression &expr, const vector<ColumnBinding> &bindings,
+                                 const vector<string> &output_names,
                                  const unordered_map<idx_t, string> &relation_names) {
 	switch (expr.GetExpressionClass()) {
 	case ExpressionClass::BOUND_REF: {
 		auto &ref = expr.Cast<BoundReferenceExpression>();
-		if (ref.index >= bindings.size()) {
+		if (ref.index >= bindings.size() || ref.index >= output_names.size()) {
 			return expr.ToString();
 		}
 		auto binding = bindings[ref.index];
 		auto entry = relation_names.find(binding.table_index);
-		if (entry == relation_names.end() || expr.GetAlias().empty()) {
+		if (entry == relation_names.end() || output_names[ref.index].empty()) {
 			return expr.ToString();
 		}
-		return entry->second + "." + expr.GetAlias();
+		return entry->second + "." + output_names[ref.index];
 	}
 	case ExpressionClass::BOUND_COLUMN_REF: {
 		auto &ref = expr.Cast<BoundColumnRefExpression>();
@@ -54,11 +102,13 @@ string FormatQualifiedExpression(const Expression &expr, const vector<ColumnBind
 }
 
 string FormatQualifiedCondition(const JoinCondition &condition, const vector<ColumnBinding> &left_bindings,
-                                const vector<ColumnBinding> &right_bindings,
+                                const vector<string> &left_names, const vector<ColumnBinding> &right_bindings,
+                                const vector<string> &right_names,
                                 const unordered_map<idx_t, string> &relation_names) {
-	return StringUtil::Format("%s %s %s", FormatQualifiedExpression(*condition.left, left_bindings, relation_names),
+	return StringUtil::Format("%s %s %s",
+	                          FormatQualifiedExpression(*condition.left, left_bindings, left_names, relation_names),
 	                          ExpressionTypeToOperator(condition.comparison),
-	                          FormatQualifiedExpression(*condition.right, right_bindings, relation_names));
+	                          FormatQualifiedExpression(*condition.right, right_bindings, right_names, relation_names));
 }
 
 } // namespace
@@ -75,14 +125,17 @@ InsertionOrderPreservingMap<string> LogicalComparisonJoin::ParamsToString() cons
 	CollectRelationNames(*children[0], relation_names);
 	CollectRelationNames(*children[1], relation_names);
 	auto left_bindings = children[0]->GetColumnBindings();
+	auto left_names = GetOutputNames(*children[0]);
 	auto right_bindings = children[1]->GetColumnBindings();
+	auto right_names = GetOutputNames(*children[1]);
 
 	string conditions_info;
 	for (idx_t i = 0; i < conditions.size(); i++) {
 		if (i > 0) {
 			conditions_info += "\n";
 		}
-		conditions_info += FormatQualifiedCondition(conditions[i], left_bindings, right_bindings, relation_names);
+		conditions_info += FormatQualifiedCondition(conditions[i], left_bindings, left_names, right_bindings,
+		                                           right_names, relation_names);
 	}
 	if (predicate) {
 		if (!conditions.empty()) {

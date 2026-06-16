@@ -36,6 +36,8 @@ public:
 	vector<LogicalType> returned_types;
 	//! The names of ALL columns that can be returned by the table function
 	vector<string> names;
+	//! Stable relation label for plan rendering (e.g. table name or explicit alias)
+	string relation_name;
 	//! A mapping of column index -> type/name for all virtual columns
 	virtual_column_map_t virtual_columns;
 	//! Columns that are used outside the scan
