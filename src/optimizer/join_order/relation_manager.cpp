@@ -12,17 +12,23 @@
 
 namespace duckdb {
 
+static void CollectBaseTableAliases(LogicalOperator &op, unordered_set<string> &aliases) {
+	if (op.type == LogicalOperatorType::LOGICAL_GET) {
+		auto &get = op.Cast<LogicalGet>();
+		if (!get.base_table_alias.empty()) {
+			aliases.insert(get.base_table_alias);
+		}
+	}
+	for (auto &child : op.children) {
+		CollectBaseTableAliases(*child, aliases);
+	}
+}
+
 static string GetBaseTableAlias(LogicalOperator &op) {
-	auto current = &op;
-	while (current) {
-		if (current->type == LogicalOperatorType::LOGICAL_GET) {
-			auto &get = current->Cast<LogicalGet>();
-			return get.base_table_alias;
-		}
-		if (current->children.size() != 1) {
-			break;
-		}
-		current = current->children[0].get();
+	unordered_set<string> aliases;
+	CollectBaseTableAliases(op, aliases);
+	if (aliases.size() == 1) {
+		return *aliases.begin();
 	}
 	return string();
 }
